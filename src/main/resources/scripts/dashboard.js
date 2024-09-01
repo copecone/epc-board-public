@@ -88,4 +88,11 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("Please Select Room!")
         }
     }
+
+    let create_button = document.querySelectorAll(".create_new_board")
+    create_button.forEach((element) => {
+        element.addEventListener("click", () => {
+            CreateBoard()
+        })
+    })
 })

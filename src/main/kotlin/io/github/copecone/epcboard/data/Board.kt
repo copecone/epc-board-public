@@ -5,6 +5,9 @@ import io.github.copecone.epcboard.data.event.BoardEventFrame
 import io.github.copecone.epcboard.data.event.client.Handshake
 import io.github.copecone.epcboard.data.event.client.NewLink
 import io.github.copecone.epcboard.data.event.room.LevelChange
+import io.github.copecone.epcboard.data.event.room.PlayerAccuracyChange
+import io.github.copecone.epcboard.data.event.room.PlayerJoin
+import io.github.copecone.epcboard.data.event.room.PlayerLeave
 import io.github.copecone.epcboard.util.SerializerUtil
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -85,7 +88,7 @@ class BoardConnection(val id: ULong) {
 }
 
 @Suppress("DeferredResultUnused")
-@OptIn(DelicateCoroutinesApi::class)
+@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
 class Board(val name: String, val roomID: ULong) {
     var enabled = true
     val apiConnection: BoardConnection = DataManager.getData(roomID)
@@ -102,7 +105,13 @@ class Board(val name: String, val roomID: ULong) {
             try {
                 while (enabled) {
                     for (session in connections) {
-                        for (frame in session.incoming) {
+                        if (session.outgoing.isClosedForSend) {
+                            session.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Outgoing is not enabled"))
+                            continue
+                        }
+
+                        while (!session.incoming.isEmpty) {
+                            val frame = session.incoming.receive()
                             frame as Frame.Text? ?: continue
 
                             val receivedText = frame.readText()
@@ -116,8 +125,6 @@ class Board(val name: String, val roomID: ULong) {
                                 }
                             }
                         }
-
-                        if (!session.outgoing.isClosedForSend) session.send("Hi!")
                     }
 
                     while (eventQueue.isNotEmpty()) {
@@ -154,8 +161,37 @@ class Board(val name: String, val roomID: ULong) {
     private fun detectAnything() {
         if (roomDataCopy == null) return
 
-        if (apiConnection.roomData!!.level.hash != roomDataCopy!!.level.hash) {
-            eventQueue.add(LevelChange())
+        if (apiConnection.roomData!!.level.hash != roomDataCopy!!.level.hash) { // 레벨 변경
+            eventQueue.add(LevelChange(apiConnection.roomData!!.level))
+        }
+
+        if (apiConnection.roomData!!.players != roomDataCopy!!.players) { // 플레이어 목록 변경
+            if (apiConnection.roomData!!.players.containsAll(roomDataCopy!!.players)) { // 플레이어 데이터 추가 (접속)
+                val joinedPlayers = apiConnection.roomData!!.players.filter { player -> !roomDataCopy!!.players.contains(player) }
+                joinedPlayers.forEach { player ->
+                    eventQueue.add(PlayerJoin(player))
+                }
+            }
+
+            if (roomDataCopy!!.players.containsAll(apiConnection.roomData!!.players)) { // 플레이어 데이터 제거 (나감)
+                val leftPlayers = roomDataCopy!!.players.filter { player -> !apiConnection.roomData!!.players.contains(player) }
+                leftPlayers.forEach { player ->
+                    eventQueue.add(PlayerLeave(player))
+                }
+            }
+
+            if (apiConnection.roomData!!.isPlaying) { // 정확도 변경?!
+                apiConnection.roomData!!.players.forEach { player ->
+                    val playerID = player.id
+
+                    if (!player.state.isSpectator) { // Check isn't spectator
+                        val stateCopy = roomDataCopy!!.players.firstOrNull { it.id == playerID }?.state ?: return@forEach
+                        if (!player.state.hitMarginsCount.contentEquals(stateCopy.hitMarginsCount)) {
+                            eventQueue.add(PlayerAccuracyChange(player, player.state.hitMarginsCount, player.state.xAcc))
+                        }
+                    }
+                }
+            }
         }
     }
 }

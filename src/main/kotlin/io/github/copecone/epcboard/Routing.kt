@@ -9,8 +9,7 @@ fun HTML.mainDashboard() {
     }
 
     body {
-        button {
-            onClick = "CreateBoard()"
+        button(classes = "create_new_board") {
             +"Create New Board"
         }
 
