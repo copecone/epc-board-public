@@ -96,6 +96,7 @@ class Board(val name: String, val roomID: ULong) {
 
     var roomDataCopy: RoomInfo? = null
     val eventQueue = ArrayDeque<BoardEvent>()
+    val closedSessionQueue = ArrayDeque<DefaultWebSocketSession>()
 
     private val connections = ArrayList<DefaultWebSocketSession>()
     fun addConnection(session: DefaultWebSocketSession) = connections.add(session)
@@ -107,6 +108,7 @@ class Board(val name: String, val roomID: ULong) {
                     for (session in connections) {
                         if (session.outgoing.isClosedForSend) {
                             session.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Outgoing is not enabled"))
+                            closedSessionQueue.add(session)
                             continue
                         }
 
@@ -127,6 +129,11 @@ class Board(val name: String, val roomID: ULong) {
                         }
                     }
 
+                    while (closedSessionQueue.isNotEmpty()) {
+                        val session = closedSessionQueue.removeFirst()
+                        connections.remove(session)
+                    }
+
                     while (eventQueue.isNotEmpty()) {
                         val event = eventQueue.removeFirst()
                         for (session in connections) {
@@ -134,7 +141,7 @@ class Board(val name: String, val roomID: ULong) {
                         }
                     }
 
-                    delay(50)
+                    delay(20)
                 }
             } catch (err: Exception) { println(err.printStackTrace()) }
         }
@@ -166,14 +173,17 @@ class Board(val name: String, val roomID: ULong) {
         }
 
         if (apiConnection.roomData!!.players != roomDataCopy!!.players) { // 플레이어 목록 변경
-            if (apiConnection.roomData!!.players.containsAll(roomDataCopy!!.players)) { // 플레이어 데이터 추가 (접속)
+            val roomDataPlayerIDs = apiConnection.roomData!!.players.map { it.id }
+            val roomDataCopyPlayerIDs = roomDataCopy!!.players.map { it.id }
+
+            if (!roomDataCopyPlayerIDs.containsAll(roomDataPlayerIDs)) { // 플레이어 데이터 추가 (접속)
                 val joinedPlayers = apiConnection.roomData!!.players.filter { player -> !roomDataCopy!!.players.contains(player) }
                 joinedPlayers.forEach { player ->
                     eventQueue.add(PlayerJoin(player))
                 }
             }
 
-            if (roomDataCopy!!.players.containsAll(apiConnection.roomData!!.players)) { // 플레이어 데이터 제거 (나감)
+            if (!roomDataPlayerIDs.containsAll(roomDataCopyPlayerIDs)) { // 플레이어 데이터 제거 (나감)
                 val leftPlayers = roomDataCopy!!.players.filter { player -> !apiConnection.roomData!!.players.contains(player) }
                 leftPlayers.forEach { player ->
                     eventQueue.add(PlayerLeave(player))
@@ -187,7 +197,7 @@ class Board(val name: String, val roomID: ULong) {
                     if (!player.state.isSpectator) { // Check isn't spectator
                         val stateCopy = roomDataCopy!!.players.firstOrNull { it.id == playerID }?.state ?: return@forEach
                         if (!player.state.hitMarginsCount.contentEquals(stateCopy.hitMarginsCount)) {
-                            eventQueue.add(PlayerAccuracyChange(player, player.state.hitMarginsCount, player.state.xAcc))
+                            eventQueue.add(PlayerAccuracyChange(player.id, player.state.hitMarginsCount, player.state.xAcc))
                         }
                     }
                 }
