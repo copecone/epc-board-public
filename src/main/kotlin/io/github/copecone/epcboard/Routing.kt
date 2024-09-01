@@ -18,9 +18,17 @@ fun HTML.mainDashboard() {
             option { value = "null"; +"" }
         }
 
-        for (board in boards) {
-            h1 {
-                +board.name
+        div(classes = "board_list") {
+            boards.forEach { (id, board) ->
+                div(classes = "board") {
+                    h1 {
+                        +board.name
+                    }
+
+                    meta("board_id") {
+                        this.content = "$id"
+                    }
+                }
             }
         }
     }

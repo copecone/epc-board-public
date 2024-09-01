@@ -3,6 +3,7 @@ package io.github.copecone.epcboard
 import io.github.copecone.epcboard.api.APIAddressReader
 import io.github.copecone.epcboard.data.Board
 import io.github.copecone.epcboard.data.BoardData
+import io.github.copecone.epcboard.util.SerializerUtil
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
@@ -21,12 +22,11 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Clock
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.time.Duration.Companion.seconds
 
-val boards = ArrayList<Board>()
+val boards = HashMap<Int, Board>()
 val client = HttpClient(CIO)
 
 @OptIn(DelicateCoroutinesApi::class)
@@ -40,24 +40,6 @@ fun main()  {
         }
 
         routing {
-            webSocket("/board/{id}") {
-                val id = call.parameters["id"]?.toInt() ?: return@webSocket call.respond(HttpStatusCode.BadRequest)
-
-                boards[id].addConnection(this)
-
-                var initialTime = Clock.System.now()
-                while (true) {
-                    delay(1)
-                    val currentTime = Clock.System.now()
-                    if (currentTime - initialTime > 5.seconds) {
-                        if (!outgoing.isClosedForSend) outgoing.send(Frame.Text("Heartbeat"))
-                        else break
-
-                        initialTime += 5.seconds
-                    }
-                }
-            }
-
             get("/") {
                 call.respondHtml(HttpStatusCode.OK) {
                     mainDashboard()
@@ -81,22 +63,50 @@ fun main()  {
                 call.respondText(reader.readText(), ContentType.Text.JavaScript)
             }
 
-            post("/board/create") {
-                try {
-                    val data = Json.decodeFromString<JsonObject>(call.receiveText())
+            route("/board") {
+                webSocket("/{id}") {
+                    val id = call.parameters["id"]?.toInt() ?: return@webSocket call.respond(HttpStatusCode.BadRequest)
+                    boards[id]?.addConnection(this) ?: return@webSocket call.respond(HttpStatusCode.NotFound)
 
-                    val boardName =
-                        data["boardName"]?.jsonPrimitive ?: return@post call.respond(HttpStatusCode.BadRequest)
-                    val roomID =
-                        data["roomID"]?.jsonPrimitive?.content?.toULong() ?: return@post call.respond(HttpStatusCode.BadRequest)
-                    val board = Board(boardName.content, roomID)
+                    var initialTime = Clock.System.now()
+                    while (true) {
+                        delay(1)
+                        val currentTime = Clock.System.now()
+                        if (currentTime - initialTime > 5.seconds) {
+                            if (!outgoing.isClosedForSend) outgoing.send(Frame.Text("Heartbeat"))
+                            else break
 
-                    boards.add(board)
+                            initialTime += 5.seconds
+                        }
+                    }
+                }
 
-                    val boardData = BoardData(board.roomID.toString(), board.name, "/board/${boards.size - 1}")
-                    call.respondText(Json.encodeToString(boardData), ContentType.Application.Json)
-                } catch (err: Exception) {
-                    println(err.stackTraceToString())
+                get("/{id}") {
+                    val id = call.parameters["id"]?.toInt() ?: return@get call.respond(HttpStatusCode.BadRequest)
+                    val board = boards[id] ?: return@get call.respond(HttpStatusCode.NotFound)
+
+                    val boardData = BoardData(board.roomID.toString(), board.name, "/board/${id}")
+                    call.respondText(SerializerUtil.jsonBuild.encodeToString(boardData), ContentType.Application.Json)
+                }
+
+                post("/create") {
+                    try {
+                        val data = SerializerUtil.jsonBuild.decodeFromString<JsonObject>(call.receiveText())
+
+                        val boardName =
+                            data["boardName"]?.jsonPrimitive ?: return@post call.respond(HttpStatusCode.BadRequest)
+                        val roomID =
+                            data["roomID"]?.jsonPrimitive?.content?.toULongOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+                        val id = generateSequence { (0..Int.MAX_VALUE).random() }.first { !boards.containsKey(it) }
+                        val board = Board(boardName.content, roomID)
+
+                        boards[id] = board
+                        val boardData = BoardData(board.roomID.toString(), board.name, "/board/${id}")
+                        call.respondText(SerializerUtil.jsonBuild.encodeToString(boardData), ContentType.Application.Json)
+                    } catch (err: Exception) {
+                        println(err.stackTraceToString())
+                    }
                 }
             }
         }
