@@ -177,14 +177,14 @@ class Board(val name: String, val roomID: ULong) {
             val roomDataCopyPlayerIDs = roomDataCopy!!.players.map { it.id }
 
             if (!roomDataCopyPlayerIDs.containsAll(roomDataPlayerIDs)) { // 플레이어 데이터 추가 (접속)
-                val joinedPlayers = apiConnection.roomData!!.players.filter { player -> !roomDataCopy!!.players.contains(player) }
-                joinedPlayers.forEach { player ->
+                val joinedPlayers = roomDataPlayerIDs.filter { player -> !roomDataCopyPlayerIDs.contains(player) }
+                joinedPlayers.map { id -> apiConnection.roomData!!.players.first { it.id == id } }.forEach { player ->
                     eventQueue.add(PlayerJoin(player))
                 }
             }
 
             if (!roomDataPlayerIDs.containsAll(roomDataCopyPlayerIDs)) { // 플레이어 데이터 제거 (나감)
-                val leftPlayers = roomDataCopy!!.players.filter { player -> !apiConnection.roomData!!.players.contains(player) }
+                val leftPlayers = roomDataCopyPlayerIDs.filter { player -> !roomDataPlayerIDs.contains(player) }
                 leftPlayers.forEach { player ->
                     eventQueue.add(PlayerLeave(player))
                 }

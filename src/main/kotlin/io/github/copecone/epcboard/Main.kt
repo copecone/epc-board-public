@@ -24,6 +24,7 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.HashMap
 import kotlin.time.Duration.Companion.seconds
 
 val boards = HashMap<Int, Board>()
